@@ -1232,319 +1232,56 @@ def refine_d3_code_google(
         logger.error(f"Error refining D3 code with Google: {str(e)}")
         return initial_code
 
-def clean_d3_response(response: str) -> str:
+def refine_d3_code_anthropic(
+    initial_code: str,
+    api_key: str,
+    max_attempts: int = 3
+) -> str:
     """
-    Clean the LLM response to ensure it only contains D3 code.
-    
-    This function removes markdown formatting, non-JavaScript lines,
-    and ensures the code starts with the createVisualization function.
-    
-    Args:
-        response (str): The raw response from the LLM.
-    
-    Returns:
-        str: Cleaned D3.js code.
-    """
-    # Remove any potential markdown code blocks
-    response = response.replace("```javascript", "").replace("```", "")
-    
-    # Remove any lines that don't look like JavaScript
-    clean_lines = [line for line in response.split('\n') if line.strip() and not line.strip().startswith('#')]
-    
-    # Ensure the code starts with the createVisualization function
-    if not any(line.strip().startswith('function createVisualization') for line in clean_lines):
-        clean_lines.insert(0, 'function createVisualization(data, svgElement) {')
-        clean_lines.append('}')
-    
-    return '\n'.join(clean_lines)
+    Refine the D3 code using Anthropic's API.
 
-def display_visualization(d3_code: str):
-    """
-    Display the D3.js visualization using an iframe and add a download button.
-    """
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <script src="https://d3js.org/d3.v7.min.js"></script>
-        <style>
-            #visualization {{
-                width: 100%;
-                height: 100vh;
-                overflow: hidden;
-            }}
-            svg {{
-                width: 100%;
-                height: 100%;
-            }}
-        </style>
-    </head>
-    <body>
-        <div id="visualization"></div>
-        <button onclick="downloadSVG()" style="position: absolute; top: 10px; right: 10px;">Download SVG</button>
-        <script>
-            {d3_code}
-            // Create the SVG element
-            const svgElement = d3.select("#visualization")
-                .append("svg")
-                .attr("viewBox", "0 0 960 540")
-                .attr("preserveAspectRatio", "xMidYMid meet")
-                .node();
-            
-            // Get the data from the parent window
-            const vizData = JSON.parse(decodeURIComponent(window.location.hash.slice(1)));
-            
-            // Call the createVisualization function
-            createVisualization(vizData, svgElement);
-
-            // Function to download the SVG
-            function downloadSVG() {{
-                const svgData = new XMLSerializer().serializeToString(svgElement);
-                const svgBlob = new Blob([svgData], {{type: "image/svg+xml;charset=utf-8"}});
-                const svgUrl = URL.createObjectURL(svgBlob);
-                const downloadLink = document.createElement("a");
-                downloadLink.href = svgUrl;
-                downloadLink.download = "visualization.svg";
-                document.body.appendChild(downloadLink);
-                downloadLink.click();
-                document.body.removeChild(downloadLink);
-            }}
-
-            // Make the visualization responsive
-            window.addEventListener('resize', function() {{
-                d3.select(svgElement).attr("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);
-            }});
-        </script>
-    </body>
-    </html>
-    """
-    
-    # Encode the data to pass it to the iframe
-    encoded_data = urllib.parse.quote(json.dumps(st.session_state.preprocessed_df.to_dict(orient='records')))
-    
-    # Display the iframe with the encoded data in the URL hash
-    st.components.v1.iframe(f"data:text/html;charset=utf-8,{urllib.parse.quote(html_content)}#{encoded_data}", 
-                            width=960, height=540, scrolling=False)
-
-def generate_fallback_visualization() -> str:
-    """
-    Generate a fallback visualization if the LLM fails.
-    
-    This function creates a simple bar chart using D3.js as a fallback
-    when the main visualization generation process fails.
-    
-    Returns:
-        str: D3.js code for a simple bar chart visualization.
-    """
-    logger.info("Generating fallback visualization")
-    
-    fallback_code = """
-    function createVisualization(data, svgElement) {
-        const margin = { top: 20, right: 20, bottom: 50, left: 50 };
-        const width = 800 - margin.left - margin.right;
-        const height = 500 - margin.top - margin.bottom;
-        
-        svgElement.attr("width", width + margin.left + margin.right)
-                   .attr("height", height + margin.top + margin.bottom);
-        
-        const svg = svgElement.append("g")
-            .attr("transform", `translate(${margin.left},${margin.top})`);
-
-        // Assuming the first column is for x-axis and second for y-axis
-        const xKey = Object.keys(data[0])[0];
-        const yKey = Object.keys(data[0])[1];
-
-        const xScale = d3.scaleBand()
-            .domain(data.map(d => d[xKey]))
-            .range([0, width])
-            .padding(0.1);
-
-        const yScale = d3.scaleLinear()
-            .domain([0, d3.max(data, d => +d[yKey])])
-            .range([height, 0]);
-
-        svg.selectAll("rect")
-            .data(data)
-            .join("rect")
-            .attr("x", d => xScale(d[xKey]))
-            .attr("y", d => yScale(+d[yKey]))
-            .attr("width", xScale.bandwidth())
-            .attr("height", d => height - yScale(+d[yKey]))
-            .attr("fill", "steelblue");
-
-        svg.append("g")
-            .attr("transform", `translate(0, ${height})`)
-            .call(d3.axisBottom(xScale));
-
-        svg.append("g")
-            .call(d3.axisLeft(yScale));
-
-        svg.append("text")
-            .attr("x", width / 2)
-            .attr("y", height + margin.top + 20)
-            .attr("text-anchor", "middle")
-            .text(xKey);
-
-        svg.append("text")
-            .attr("transform", "rotate(-90)")
-            .attr("x", -height / 2)
-            .attr("y", -margin.left + 20)
-            .attr("text-anchor", "middle")
-            .text(yKey);
-    }
-    """
-    
-    logger.info("Fallback visualization generated successfully")
-    return fallback_code
-
-def main():
-    st.set_page_config(
-        page_title="🎨 Comparative Visualization Generator",
-        page_icon="✨",
-        layout="wide",
-    )
-    st.title("🎨 Comparative Visualization Generator")
-
-    # Retrieve API credentials
-    api_credentials = get_api_credentials()
-
-    # Model Selection
-    selected_model = get_model_selection()
-
-    # Determine the provider of the selected model
-    provider = st.session_state.get("provider")
-    if not provider:
-        st.error("Selected model provider is not recognized.")
-        st.stop()
-
-    # Retrieve the corresponding API key
-    api_key = api_credentials.get(provider)
-    if not api_key:
-        st.error(f"API key for {provider.capitalize()} is missing. Please provide it in the sidebar.")
-        st.stop()
-
-    st.header("Upload CSV Files")
-    col1, col2 = st.columns(2)
-    with col1:
-        file1 = st.file_uploader("Upload first CSV file", type="csv")
-    with col2:
-        file2 = st.file_uploader("Upload second CSV file", type="csv")
-
-    if 'update_viz' not in st.session_state:
-        st.session_state.update_viz = False
-
-    if file1 and file2:
-        try:
-            if (
-                'preprocessed_df' not in st.session_state
-                or st.session_state.preprocessed_df is None
-                or st.session_state.update_viz
-            ):
-                with st.spinner("Preprocessing data..."):
-                    merged_df = preprocess_data(file1, file2)
-                st.session_state.preprocessed_df = merged_df
-                st.session_state.update_viz = False  # Reset the flag
-
-            with st.expander("Preview of preprocessed data"):
-                st.dataframe(st.session_state.preprocessed_df.head())
-
-            if 'current_viz' not in st.session_state or st.session_state.current_viz is None:
-                with st.spinner("Generating initial D3 visualization..."):
-                    d3_code = generate_and_validate_d3_code(
-                        st.session_state.preprocessed_df,
-                        api_key,
-                        user_input="",  # Initial request
-                        viz_type=st.session_state.get("viz_type", "Bar Chart")
-                    )
-                    st.session_state.current_viz = d3_code
-                    st.session_state.workflow_history.append({
-                        "version": len(st.session_state.workflow_history) + 1,
-                        "request": "Initial comparative visualization",
-                        "code": d3_code
-                    })
-
-            # Create a placeholder for the visualization
-            viz_placeholder = st.empty()
-
-            # Display the current visualization
-            with viz_placeholder.container():
-                st.subheader("Current Visualization")
-                display_visualization(st.session_state.current_viz)
-
-            st.subheader("Modify Visualization")
-            user_input = st.text_area(
-                "Enter your modification request (or type 'exit' to finish):",
-                height=100
-            )
-
-    else:
-        prompt = base_prompt
-    
-    try:
-        response = client.chat.completions.create(
-            model=st.session_state.get("selected_model", "gpt-4"),  # Use the selected model
-            messages=[
-                {"role": "system", "content": "You are a D3.js expert specializing in creating sophisticated, interactive, and comparative visualizations. Your code must explicitly address all requirements and ensure a comparative aspect between two data sources."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        d3_code = response.choices[0].message.content
-        if not d3_code.strip():
-            raise ValueError("Generated D3 code is empty")
-
-        return d3_code
-    except Exception as e:
-        logger.error(f"Error generating D3 code with OpenAI: {str(e)}")
-        return generate_fallback_visualization()
-
-def refine_d3_code(initial_code: str, api_key: str, max_attempts: int = 3) -> str:
-    """
-    Refine the D3 code through iterative LLM calls if necessary.
-    
-    This function attempts to improve the generated D3 code if it fails validation.
-    It makes multiple attempts to refine the code using the OpenAI API.
-    
     Args:
         initial_code (str): The initial D3.js code to refine.
-        api_key (str): OpenAI API key.
+        api_key (str): Anthropic API key.
         max_attempts (int, optional): Maximum number of refinement attempts. Defaults to 3.
-    
+
     Returns:
         str: Refined D3.js code, or the last attempt if refinement fails.
     """
-    client = OpenAI(api_key=api_key)
-    
-    for attempt in range(max_attempts):
-        if validate_d3_code(initial_code):
-            return initial_code
-        
-        refinement_prompt = f"""
-        The following D3 code needs refinement to be valid:
-        
-        {initial_code}
-        
-        Please provide a corrected version that:
-        1. Defines a createVisualization(data, svgElement) function
-        2. Uses only D3.js version 7 syntax
-        3. Creates a valid visualization
-        
-        Return ONLY the corrected D3 code without any explanations or comments.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-4o",  # Updated model name
-            messages=[
-                {"role": "system", "content": "You are a D3.js expert. Provide only valid D3 code."},
-                {"role": "user", "content": refinement_prompt}
-            ]
-        )
-        
-        initial_code = clean_d3_response(response.choices[0].message.content)
-    
-    # If we've exhausted our attempts, return the last attempt
-    logger.warning("Failed to generate valid D3 code after maximum attempts")
-    return initial_code
+    # Placeholder implementation for Anthropic API refinement
+    try:
+        for attempt in range(max_attempts):
+            if validate_d3_code(initial_code):
+                return initial_code
+
+            refinement_prompt = f"""
+            The following D3 code needs refinement to be valid:
+            
+            {initial_code}
+            
+            Please provide a corrected version that:
+            1. Defines a createVisualization(data, svgElement) function
+            2. Uses only D3.js version 7 syntax
+            3. Creates a valid visualization
+            
+            Return ONLY the corrected D3 code without any explanations or comments.
+            """
+
+            # Implement Anthropic-specific API call for refinement
+            # Placeholder response
+            refined_code = """
+            function createVisualization(data, svgElement) {
+                // Refined D3.js code by Anthropic API
+                console.log("D3.js code refined using Anthropic API");
+            }
+            """
+            initial_code = clean_d3_response(refined_code)
+
+        logger.warning("Failed to generate valid D3 code after maximum attempts with Anthropic")
+        return initial_code
+    except Exception as e:
+        logger.error(f"Error refining D3 code with Anthropic: {str(e)}")
+        return initial_code
 
 def clean_d3_response(response: str) -> str:
     """
@@ -1879,3 +1616,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+    #add a button to download the svg 
