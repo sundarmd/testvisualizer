@@ -802,6 +802,4 @@ if __name__ == "__main__":
 
     # Note: The download button for the SVG is already included within the display_visualization function.
 
-
-
-#testing config update
+    #test config update
